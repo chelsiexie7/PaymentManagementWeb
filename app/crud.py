@@ -5,20 +5,19 @@ from datetime import datetime
 from bson.objectid import ObjectId
 import math
 
-# 连接MongoDB数据库
 client = MongoClient("mongodb://localhost:27017/")
 db = client.payment_management
 
-# 将CSV文件数据插入到数据库
+# store csv data into the mongodb database
 def import_csv_to_db(file_path: str):
     df = pd.read_csv(file_path)
     
-    # 确保字段符合规定
+    #format the data
     df['payee_added_date_utc'] = pd.to_datetime(df['payee_added_date_utc'])
     df['payee_due_date'] = pd.to_datetime(df['payee_due_date'])
     df['total_due'] = df.apply(calculate_total_due, axis=1)
 
-    # 将数据插入到MongoDB
+    # inert the data into MongoDB
     for _, row in df.iterrows():
         db.payments.insert_one(row.to_dict())
 
@@ -33,18 +32,16 @@ def calculate_total_due(row):
 from datetime import datetime
 
 def get_payments(name: str = None):
-    # 创建 MongoDB 查询条件
     query = {}
     if name:
-        query["payee_first_name"] = {"$regex": name, "$options": "i"}  # 模糊匹配名字，忽略大小写
+        query["payee_first_name"] = {"$regex": name, "$options": "i"}  
 
     payments_cursor = db.payments.find(query)
     updated_payments = []
     for payment in payments_cursor:
-        # 转换 _id 为字符串
         payment["_id"] = str(payment["_id"])
 
-        # 检查并转换 payee_due_date 的格式
+
         if isinstance(payment['payee_due_date'], str):
             due_date = datetime.strptime(payment['payee_due_date'], "%Y-%m-%d").date()
         elif isinstance(payment['payee_due_date'], datetime):
@@ -52,16 +49,14 @@ def get_payments(name: str = None):
         else:
             raise ValueError("Invalid date format in 'payee_due_date'")
 
-        # 检查并更新支付状态
         if due_date == datetime.today().date():
             payment['payee_payment_status'] = 'due_now'
         elif due_date < datetime.today().date():
             payment['payee_payment_status'] = 'overdue'
 
-        # 更新数据库中的记录
         db.payments.update_one({'_id': ObjectId(payment['_id'])}, {'$set': {'payee_payment_status': payment['payee_payment_status']}})
 
-        # 替换 NaN 值为 None
+        # subsititute NaN to None
         for key, value in payment.items():
             if isinstance(value, float) and math.isnan(value):
                 payment[key] = None
@@ -71,19 +66,19 @@ def get_payments(name: str = None):
     return updated_payments
 
 
-# 创建支付记录
+# post function
 def create_payment(payment: Payment):
     payment_data = payment.dict()
     db.payments.insert_one(payment_data)
     return {"id": str(payment_data["_id"])}
 
-# 更新支付记录
+# update function
 def update_payment(payment_id: str, payment: Payment):
     update_data = payment.dict(exclude_unset=True)
     db.payments.update_one({"_id": payment_id}, {"$set": update_data})
     return {"status": "success"}
 
-# 删除支付记录
+# delete function
 def delete_payment(payment_id: str):
     db.payments.delete_one({"_id": payment_id})
     return {"status": "success"}
